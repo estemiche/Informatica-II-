@@ -8,58 +8,49 @@ using namespace std;
 
 unsigned char* loadPixels(QString input, int &width, int &height);
 bool exportImage(unsigned char* pixelData, int width, int height, QString archivoSalida);
+unsigned int* loadSeedMasking(const char* nombreArchivo, int &seed, int &n_pixels);
 
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    QString archivoEntrada = "I_D_R1.bmp";
-    QString archivoMascara = "M.bmp";
-    QString archivoSalida  = "I_D_R2.bmp";
+    QString archivoEntrada = "I_D_R2.bmp";
+    QString archivoSalida  = "I_D_R3.bmp";
+    QString archivoM2 = "M2.txt";
 
-    int width1 = 0, height1 = 0;
-    int width2 = 0, height2 = 0;
+    int width = 0, height = 0;
 
-    // Imprimir tamaños de ambas imágenes
-    QImage imgMascarada(archivoEntrada);
-    QImage imgMascara(archivoMascara);
-    cout << "Tamaño I_D_R1.bmp: " << imgMascarada.width() << "x" << imgMascarada.height() << endl;
-    cout << "Tamaño M.bmp:      " << imgMascara.width() << "x" << imgMascara.height() << endl;
-
-    // Cargar las imágenes
-    unsigned char* imagen1 = loadPixels(archivoEntrada, width1, height1);
-    unsigned char* imagen2 = loadPixels(archivoMascara, width2, height2);
-
-    if (!imagen1 || !imagen2) {
-        cerr << "Error al cargar las imágenes." << endl;
-        delete[] imagen1;
-        delete[] imagen2;
+    // Cargar imagen desenmascarada parcialmente (I_D_R2)
+    unsigned char* pixelData = loadPixels(archivoEntrada, width, height);
+    if (!pixelData) {
+        cerr << "Error al cargar la imagen '" << archivoEntrada.toStdString() << "'" << endl;
         return -1;
     }
 
-    // Aplicar XOR con patrón de máscara repetido
-    unsigned char* resultado = new unsigned char[width1 * height1 * 3];
-    for (int y = 0; y < height1; ++y) {
-        for (int x = 0; x < width1; ++x) {
-            int pos = (y * width1 + x) * 3;
-            int maskY = y % height2;
-            int maskX = x % width2;
-            int maskPos = (maskY * width2 + maskX) * 3;
+    // Cargar el archivo de enmascaramiento M2.txt
+    int seed = 0;
+    int n_pixels = 0;
+    unsigned int* maskingData = loadSeedMasking(archivoM2.toStdString().c_str(), seed, n_pixels);
 
-            resultado[pos]     = applyXOR(&imagen1[pos],     imagen2[maskPos]);
-            resultado[pos + 1] = applyXOR(&imagen1[pos + 1], imagen2[maskPos + 1]);
-            resultado[pos + 2] = applyXOR(&imagen1[pos + 2], imagen2[maskPos + 2]);
+    if (maskingData != nullptr) {
+        for (int i = 0; i < n_pixels; ++i) {
+            int index = (seed + i) % (width * height);  // Índice del píxel
+            int pos = index * 3;
+            pixelData[pos]     = applyXOR(&pixelData[pos], maskingData[i * 3]);       // R
+            pixelData[pos + 1] = applyXOR(&pixelData[pos + 1], maskingData[i * 3 + 1]); // G
+            pixelData[pos + 2] = applyXOR(&pixelData[pos + 2], maskingData[i * 3 + 2]); // B
         }
+
+        delete[] maskingData;
+    } else {
+        cerr << "No se pudo cargar el archivo de enmascaramiento M2.txt" << endl;
     }
 
-    // Exportar imagen resultante
-    bool exportado = exportImage(resultado, width1, height1, archivoSalida);
+    // Exportar la imagen resultante
+    bool exportado = exportImage(pixelData, width, height, archivoSalida);
     cout << "Exportacion: " << (exportado ? "Exitosa" : "Fallida") << endl;
 
-    delete[] imagen1;
-    delete[] imagen2;
-    delete[] resultado;
-
+    delete[] pixelData;
     return 0;
 }
 
@@ -92,8 +83,42 @@ bool exportImage(unsigned char* pixelData, int width, int height, QString archiv
         cout << "Error: No se pudo guardar la imagen BMP modificada.";
         return false;
     } else {
-        cout << "Imagen BMP modificada guardada como "
-             << archivoSalida.toStdString() << endl;
+        cout << "Imagen BMP modificada guardada como " << archivoSalida.toStdString() << endl;
         return true;
     }
+}
+
+unsigned int* loadSeedMasking(const char* nombreArchivo, int &seed, int &n_pixels){
+    ifstream archivo(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "No se pudo abrir el archivo." << endl;
+        return nullptr;
+    }
+
+    archivo >> seed;
+    int r, g, b;
+    while (archivo >> r >> g >> b) {
+        n_pixels++;
+    }
+    archivo.close();
+
+    archivo.open(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "Error al reabrir el archivo." << endl;
+        return nullptr;
+    }
+
+    unsigned int* RGB = new unsigned int[n_pixels * 3];
+    archivo >> seed;
+    for (int i = 0; i < n_pixels * 3; i += 3) {
+        archivo >> r >> g >> b;
+        RGB[i]     = r;
+        RGB[i + 1] = g;
+        RGB[i + 2] = b;
+    }
+
+    archivo.close();
+    cout << "Semilla: " << seed << endl;
+    cout << "Cantidad de pixeles leidos: " << n_pixels << endl;
+    return RGB;
 }
